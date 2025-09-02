@@ -21,6 +21,10 @@ var
 
 var totalBytesSent: ChartData = @[]
 var totalBytesReceived: ChartData = @[]
+var currProcBytesSent: ChartData = @[]
+var currProcBytesReceived: ChartData = @[]
+var selectedProcess = -1
+var selectedProcessName = ""
 
 proc calculateSpeed(currentBytes, prevBytes: int64, timeDelta: float): string =
   ## Calculate speed in KB/s
@@ -33,6 +37,18 @@ proc calculateSpeed(currentBytes, prevBytes: int64, timeDelta: float): string =
   
   let kbPerSecond = (bytesDelta.float / 1024.0) / timeDelta
   result = fmt"{kbPerSecond:.1f} KB/s"
+
+proc calculateSpeedFloat(currentBytes, prevBytes: int64, timeDelta: float): float =
+  ## Calculate speed in KB/s
+  if timeDelta <= 0 or prevBytes == 0:
+    return 0.0
+  
+  let bytesDelta = currentBytes - prevBytes
+  if bytesDelta <= 0:
+    return 0.0
+  
+  let kbPerSecond = (bytesDelta.float / 1024.0) / timeDelta
+  result = kbPerSecond
 
 proc formatConnectionData(connections: seq[SocketInfo]): seq[seq[string]] =
   result = @[]
@@ -54,7 +70,7 @@ let updateNetworkData = proc(appPtr: ptr TerminalApp, id: string) {.gcsafe.} =
     let networkDataStr = getUpdate()
 
     notify(appPtr, id, "network-update", networkDataStr)
-    sleep(3000)
+    sleep(1000)
 
 proc main() =
   var state = AppState(
@@ -87,18 +103,40 @@ proc main() =
   bsChart.title = "Total Bytes Sent (Mb)"
   bsChart.chartType = BarChart
   bsChart.setData(totalBytesSent)
-  bsChart.showGrid = true
+  bsChart.showGrid = false
   bsChart.showLabels = true
   bsChart.showValues = true
+  bsChart.maxVisiblePoints = 9
 
   var brChart = newChart(id="bytes-recv-chart")
   brChart.border = true
   brChart.title = "Total Bytes Received (Mb)"
   brChart.chartType = BarChart
   brChart.setData(totalBytesReceived)
-  brChart.showGrid = true
+  brChart.showGrid = false
   brChart.showLabels = true
   brChart.showValues = true
+  brChart.maxVisiblePoints = 9
+
+  var selSentChart = newChart(id="selected-pid-bytes-sent-chart")
+  selSentChart.border = true
+  selSentChart.title = "Total Bytes Sent (Kb/s)"
+  selSentChart.chartType = LineChart
+  selSentChart.setData(@[])
+  selSentChart.showGrid = false
+  selSentChart.showLabels = true
+  selSentChart.showValues = true
+  selSentChart.maxVisiblePoints = 9
+
+  var selRecvChart = newChart(id="selected-pid-bytes-recv-chart")
+  selRecvChart.border = true
+  selRecvChart.title = "Total Bytes Recv (Kb/s)"
+  selRecvChart.chartType = LineChart
+  selRecvChart.setData(@[])
+  selRecvChart.showGrid = false
+  selRecvChart.showLabels = true
+  selRecvChart.showValues = true
+  selRecvChart.maxVisiblePoints = 9
 
   # Create connection table
   const header = @["PID", "Process", "Protocol", "Local", "Remote", "State", "Sent", "Received"]
@@ -172,6 +210,13 @@ proc main() =
                           else:
                             "0.0 KB/s"
         
+        if selectedProcess > -1 and selectedProcess == pid:
+          let currKbSent = calculateSpeedFloat(bytesSent, prevBytesSent[pid], timeDelta)
+          selSentChart.addDataPoint($currentTime.format("HH:mm:ss"), currKbSent)
+
+          let currKbRecv = calculateSpeedFloat(bytesReceived, prevBytesReceived[pid], timeDelta)
+          selRecvChart.addDataPoint($currentTime.format("HH:mm:ss"), currKbRecv)
+
         let row = @[
           $pid, 
           soc["process_name"].getStr(), 
@@ -202,17 +247,41 @@ proc main() =
       quit(-1)
   )
 
+  connectionTable.on("enter", proc(tb: tui_widget.Table, args: varargs[string]) = 
+    try:
+      if tb.rows().len() == 0:
+        return
+
+      let currRow = tb.selected()
+      selectedProcess = parseInt(currRow.columns[0].text)
+      selectedProcessName = currRow.columns[1].text
+      selRecvChart.clearData()
+      selSentChart.clearData()
+      selRecvChart.title = fmt"[{selectedProcessName}] bytes received (KB/s)"
+      selSentChart.title = fmt"[{selectedProcessName}] bytes sent (KB/s)"
+      selRecvChart.show()
+      selSentChart.show()
+    except:
+      selRecvChart.hide()
+      selSentChart.hide()
+      selRecvChart.clearData()
+      selSentChart.clearData()
+      selectedProcessName = ""
+      selectedProcess = -1
+  )
+
   let updateNetworkDataTask = toTask updateNetworkData(addr app, connectionTable.id)
   runInBackground(updateNetworkDataTask)
 
   # Add widgets to app
   app.addWidget(tcpConnCount, 0.5, 0.05)
   app.addWidget(udpConnCount, 0.5, 0.05)
-  app.addWidget(bsChart, 0.5, 0.3)
-  app.addWidget(brChart, 0.5, 0.3)
-  app.addWidget(connectionTable, 1.0, 0.55, 0, 1, 0, 0)
+  app.addWidget(bsChart, 0.5, 0.25)
+  app.addWidget(brChart, 0.5, 0.25)
+  app.addWidget(connectionTable, 1.0, 0.45)
+  app.addWidget(selSentChart, 0.5, 0.18)
+  app.addWidget(selRecvChart, 0.5, 0.18)
 
- 
   # Run the app
   app.run(nonBlocking=true)
 
