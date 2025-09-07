@@ -12,3 +12,4 @@ bin           = @["nettui"]
 
 requires "nim >= 2.0.0"
 requires "tui_widget >= 0.1.3"
+requires "octolog >= 0.1.0"
