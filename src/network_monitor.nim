@@ -1,6 +1,5 @@
-import std/[os, strutils, sequtils, tables, strformat, times, json, parseutils]
+import std/[os, strutils, sequtils, tables, strformat, times, json]
 import net, nativesockets
-import octolog
 
 type
   SocketInfo* = object

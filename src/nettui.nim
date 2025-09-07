@@ -1,4 +1,4 @@
-import std/[times, strformat, strutils, os, sequtils, tables, tasks, json]
+import std/[times, strformat, strutils, os, tables, tasks, json]
 import tui_widget
 import ./network_monitor
 import octolog
