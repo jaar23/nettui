@@ -1,4 +1,4 @@
-import std/[times, strformat, strutils, os, tables, tasks, json]
+import std/[times, strformat, strutils, os, tables, tasks, json, parseopt]
 import tui_widget
 import ./network_monitor
 import octolog
@@ -26,6 +26,7 @@ var currProcBytesSent: ChartData = @[]
 var currProcBytesReceived: ChartData = @[]
 var selectedProcess = -1
 var selectedProcessName = ""
+var refreshInterval = 2000  # Default to 2 seconds (2000 ms)
 
 # start logging
 octologStart(fileName="/tmp/nettui")
@@ -73,7 +74,7 @@ let updateNetworkData = proc(appPtr: ptr TerminalApp, id: string) {.gcsafe.} =
     let networkDataStr = getUpdate()
 
     notify(appPtr, id, "network-update", networkDataStr)
-    sleep(1000)
+    sleep(refreshInterval)
 
 proc main() =
   var state = AppState(
@@ -98,7 +99,7 @@ proc main() =
   udpConnCount.text = "UDP: N/A" 
   udpConnCount.bg(bgGreen) 
   udpConnCount.fg(fgBlack)
-  udpConnCount.align = Center
+  tcpConnCount.align = Center
   udpConnCount.border = true
 
   var conntrackCount = newLabel(id="conntrack-connection")
@@ -196,11 +197,6 @@ proc main() =
       let natTranslations = networkObject["network_stats"]["nat_translations"].getInt()
       natCount.text = if natTranslations > 0: fmt"NAT: {natTranslations}" else: "NAT: 0"
 
-      # if bsChart.data.len() > 99:
-      #   bsChart.data.delete(0, 9)
-      # if brChart.data.len() > 99:
-      #   brChart.data.delete(0, 9)
-
       let totalBytesSent = networkObject["network_stats"]["total_bytes_sent"].getFloat()
       let newPoint = DataPoint(label: $currentTime.format("HH:mm:ss"), value: totalBytesSent / 1024000.0)
       bsChart.addDataPoint(newPoint.label, newPoint.value)
@@ -235,11 +231,6 @@ proc main() =
         let rxQueue = if soc.hasKey("rx_queue"): $soc["rx_queue"].getInt() else: "0"
         let queueInfo = fmt"{txQueue}/{rxQueue}"
 
-        # if selSentChart.data.len() > 99:
-        #   selSentChart.data.delete(0, 9)
-        # if selRecvChart.data.len() > 99:
-        #   selRecvChart.data.delete(0, 9)
-
         if selectedProcess > -1 and selectedProcess == pid:
           let currKbSent = calculateSpeedFloat(bytesSent, prevBytesSent[pid], timeDelta)
           selSentChart.addDataPoint($currentTime.format("HH:mm:ss"), currKbSent)
@@ -247,7 +238,6 @@ proc main() =
           let currKbRecv = calculateSpeedFloat(bytesReceived, prevBytesReceived[pid], timeDelta)
           selRecvChart.addDataPoint($currentTime.format("HH:mm:ss"), currKbRecv)
 
-        # octolog.info($soc)
         # Handle NAT fields that might be empty due to permissions
         let natSrcAddr = if soc.hasKey("nat_src_address"): soc["nat_src_address"].getStr() else: "n/a"
         let natDstAddr = if soc.hasKey("nat_dst_address"): soc["nat_dst_address"].getStr() else: "n/a"
@@ -337,5 +327,30 @@ proc main() =
 
   octologStop()
 
+proc processArguments() =
+  var optParser = initOptParser()
+  while true:
+    optParser.next()
+    case optParser.kind
+    of cmdEnd: break
+    of cmdShortOption, cmdLongOption:
+      case optParser.key
+      of "r", "refresh":
+        try:
+          refreshInterval = parseInt(optParser.val) * 1000  # Convert seconds to milliseconds
+        except ValueError:
+          echo "Invalid refresh interval: ", optParser.val
+          echo "Using default value of 2 seconds"
+          refreshInterval = 2000
+      else:
+        echo "Unknown option: ", optParser.key
+        echo "Usage: nettui [-r|--refresh <seconds>]"
+        quit(1)
+    of cmdArgument:
+      echo "Unexpected argument: ", optParser.key
+      echo "Usage: nettui [-r|--refresh <seconds>]"
+      quit(1)
+
 when isMainModule:
+  processArguments()
   main()
